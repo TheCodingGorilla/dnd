@@ -41,6 +41,16 @@ body.placement-loading .tile {
 
 main { width: 100vw; min-height: 100vh; display: grid; grid-template-columns: 1fr minmax(220px, 380px); gap: var(--tile-gap); padding: calc(var(--tile-gap) * 1.5); align-items: center; }
 
+@property --chase-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes chase-border {
+  to { --chase-angle: 360deg; }
+}
+
 .board {
   width: var(--bg-display-size);
   height: var(--bg-display-size);
@@ -51,6 +61,28 @@ main { width: 100vw; min-height: 100vh; display: grid; grid-template-columns: 1f
   background-position: calc(50% + var(--board-offset-x)) calc(50% + var(--board-offset-y));
   background-repeat: no-repeat;
   padding: 0; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+}
+
+.board::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 18px;
+  background: conic-gradient(
+    from var(--chase-angle),
+    transparent 50%,
+    rgba(180, 110, 10, 0.0) 58%,
+    rgba(220, 160, 60, 0.5) 66%,
+    rgba(255, 230, 120, 1) 72%,
+    rgba(255, 255, 200, 1) 75%,
+    rgba(255, 230, 120, 1) 78%,
+    rgba(220, 160, 60, 0.5) 85%,
+    rgba(180, 110, 10, 0.0) 92%,
+    transparent 97%
+  );
+  filter: blur(10px);
+  z-index: -1;
+  animation: chase-border 5s linear infinite;
 }
 
 .slots {
@@ -143,21 +175,34 @@ main { width: 100vw; min-height: 100vh; display: grid; grid-template-columns: 1f
 }
 
 /* Sprite position mapping (3x3 grid, 110px each) */
-.tile[data-position="KUBAZAN"] { background-position: 0 0; }
-.tile[data-position="NANGNANG"] { background-position: -110px 0; }
+.tile[data-position="KUBAZAN"] { background-position: -220px -220px; }
+.tile[data-position="NANGNANG"] { background-position: -220px -110px; }
 .tile[data-position="IJIN"] { background-position: -220px 0; }
-.tile[data-position="WONGO"] { background-position: 0 -110px; }
-.tile[data-position="MOA"] { background-position: -110px -110px; }
-.tile[data-position="UNKH"] { background-position: -220px -110px; }
-.tile[data-position="PAPAZOTL"] { background-position: 0 -220px; }
+.tile[data-position="WONGO"] { background-position: 0 -220px; }
+.tile[data-position="MOA"] { background-position: 0 -110px; }
+.tile[data-position="UNKH"] { background-position: -110px 0; }
+.tile[data-position="PAPAZOTL"] { background-position: -110px -110px; }
 .tile[data-position="SHAGAMBI"] { background-position: -110px -220px; }
-.tile[data-position="OBOLAKA"] { background-position: -220px -220px; }
+.tile[data-position="OBOLAKA"] { background-position: 0 0; }
 
 /* keep a subtle carved glyph overlay but remove circular moss blotch */
 .tile::before { display: none; }
 .tile::after { display: none; }
 
-.tile.dragging { position: fixed; z-index: 9999; transform: rotate(var(--tile-rotation, 0deg)) scale(1.03); box-shadow: 0 36px 72px rgba(6,6,6,0.7); cursor: grabbing; }
+.debug-cost {
+  position: absolute;
+  bottom: 3px;
+  right: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1;
+  pointer-events: none;
+  z-index: 1;
+  display: none;
+}
+
+.tile.dragging { position: fixed; z-index: 9999; transform: rotate(var(--tile-rotation, 0deg)) scale(1.03); box-shadow: 0 0 0 3px rgba(212, 168, 90, 0.8), 0 0 16px rgba(212, 168, 90, 0.6), 0 36px 72px rgba(6,6,6,0.7); cursor: grabbing; }
 .tile.placed { opacity: 0.99; transform: rotate(var(--tile-rotation, 0deg)) scale(0.998); }
 .tile:not(.in-slot):not(.dragging) {
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.75), inset 0 4px 10px rgba(255,255,255,0.02);

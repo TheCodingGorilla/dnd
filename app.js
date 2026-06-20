@@ -34,6 +34,9 @@ tileMoveAudio.loop = true;
 const tileSlotAudio = new Audio('tile-slot.wav');
 tileSlotAudio.volume = 0.5;
 
+const correctAudio = new Audio('correct.mp3');
+correctAudio.volume = 0.7;
+
 let tileMovePlaying = false;
 
 function playTileMoveSound() {
@@ -136,6 +139,10 @@ function restorePlacement() {
 
 tiles.forEach(tile => {
   tile.dataset.cost = tileCosts[tile.dataset.position] ?? 0;
+  const debugLabel = document.createElement('span');
+  debugLabel.className = 'debug-cost';
+  debugLabel.textContent = tile.dataset.cost;
+  tile.appendChild(debugLabel);
 });
 
 let draggedTile = null;
@@ -158,12 +165,17 @@ function updateMarkers() {
     [slots[6], slots[7], slots[8]],
   ];
 
+  let newlyCorrect = 0;
+
   grid.forEach((row, rowIndex) => {
     const sum = row.reduce((total, slot) => {
       const tile = slot.querySelector('.tile');
       return total + (tile ? Number(tile.dataset.cost || 0) : 0);
     }, 0);
-    rowMarkers[rowIndex].classList.toggle('glow', sum === rowTargets[rowIndex]);
+    const wasGlowing = rowMarkers[rowIndex].classList.contains('glow');
+    const isCorrect = sum === rowTargets[rowIndex];
+    rowMarkers[rowIndex].classList.toggle('glow', isCorrect);
+    if (isCorrect && !wasGlowing) newlyCorrect++;
   });
 
   for (let colIndex = 0; colIndex < 3; colIndex++) {
@@ -171,7 +183,15 @@ function updateMarkers() {
       const tile = row[colIndex].querySelector('.tile');
       return total + (tile ? Number(tile.dataset.cost || 0) : 0);
     }, 0);
-    colMarkers[colIndex].classList.toggle('glow', sum === colTargets[colIndex]);
+    const wasGlowing = colMarkers[colIndex].classList.contains('glow');
+    const isCorrect = sum === colTargets[colIndex];
+    colMarkers[colIndex].classList.toggle('glow', isCorrect);
+    if (isCorrect && !wasGlowing) newlyCorrect++;
+  }
+
+  if (newlyCorrect > 0) {
+    correctAudio.currentTime = 0;
+    correctAudio.play().catch(() => {});
   }
 
   // After updating glows, check for full puzzle solve
