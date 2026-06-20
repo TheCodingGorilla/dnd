@@ -1,5 +1,6 @@
 const tiles = Array.from(document.querySelectorAll('.tile'));
 const slots = Array.from(document.querySelectorAll('.slot'));
+console.info('dnd puzzle app version: 2026-06-20-b');
 const tileCosts = {
   KUBAZAN: 1,
   NANGNANG: 4,
@@ -25,6 +26,7 @@ const colMarkers = [
 ];
 
 const storageKey = 'dndPuzzleTilePlacement';
+let audioUnlocked = false;
 
 // Audio for tile moves
 const tileMoveAudio = new Audio('tile-move.wav');
@@ -33,9 +35,48 @@ tileMoveAudio.loop = true;
 
 const tileSlotAudio = new Audio('tile-slot.wav');
 tileSlotAudio.volume = 0.5;
+tileSlotAudio.preload = 'auto';
 
 const correctAudio = new Audio('correct.mp3');
 correctAudio.volume = 0.7;
+correctAudio.preload = 'auto';
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+
+  [tileMoveAudio, tileSlotAudio, correctAudio].forEach(sound => {
+    try {
+      sound.muted = true;
+      sound.currentTime = 0;
+      const p = sound.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          sound.pause();
+          sound.currentTime = 0;
+          sound.muted = false;
+        }).catch(() => {
+          sound.muted = false;
+        });
+      } else {
+        sound.pause();
+        sound.currentTime = 0;
+        sound.muted = false;
+      }
+    } catch (e) {
+      sound.muted = false;
+    }
+  });
+}
+
+function playOneShot(sound, volume) {
+  sound.pause();
+  sound.currentTime = 0;
+  sound.volume = volume;
+  sound.play().catch(() => {});
+}
+
+
 
 let tileMovePlaying = false;
 
@@ -55,8 +96,7 @@ function stopTileMoveSound() {
 
 function playTileSlotSound() {
   stopTileMoveSound();
-  tileSlotAudio.currentTime = 0;
-  tileSlotAudio.play().catch(() => {});
+  playOneShot(tileSlotAudio, 0.5);
 }
 
 function resetTileInlineStyles(tile) {
@@ -148,6 +188,7 @@ tiles.forEach(tile => {
 let draggedTile = null;
 let hoveredSlot = null;
 let originalParent = null;
+let activePointerId = null;
 let offsetX = 0;
 let offsetY = 0;
 
@@ -190,8 +231,7 @@ function updateMarkers() {
   }
 
   if (newlyCorrect > 0) {
-    correctAudio.currentTime = 0;
-    correctAudio.play().catch(() => {});
+    playOneShot(correctAudio, 0.7);
   }
 
   // After updating glows, check for full puzzle solve
@@ -339,6 +379,7 @@ function getSlotUnderPoint(x, y) {
 
 function endDrag(pointerEvent) {
   if (!draggedTile) return;
+  if (activePointerId !== null && pointerEvent.pointerId !== activePointerId) return;
   const slot = getSlotUnderPoint(pointerEvent.clientX, pointerEvent.clientY);
 
   if (slot && !slot.querySelector('.tile')) {
@@ -372,13 +413,20 @@ function endDrag(pointerEvent) {
   draggedTile = null;
   originalParent = null;
   originalNextSibling = null;
-  window.removeEventListener('pointermove', onPointerMove);
-  window.removeEventListener('pointerup', onPointerUp);
-  window.removeEventListener('pointercancel', onPointerCancel);
+  activePointerId = null;
+  if (pointerEvent.currentTarget && pointerEvent.currentTarget.removeEventListener) {
+    pointerEvent.currentTarget.removeEventListener('pointermove', onPointerMove);
+    pointerEvent.currentTarget.removeEventListener('pointerup', onPointerUp);
+    pointerEvent.currentTarget.removeEventListener('pointercancel', onPointerCancel);
+  }
+  document.removeEventListener('pointermove', onPointerMove);
+  document.removeEventListener('pointerup', onPointerUp);
+  document.removeEventListener('pointercancel', onPointerCancel);
 }
 
 function onPointerMove(event) {
   if (!draggedTile) return;
+  if (activePointerId !== null && event.pointerId !== activePointerId) return;
   draggedTile.style.left = `${event.clientX - offsetX}px`;
   draggedTile.style.top = `${event.clientY - offsetY}px`;
 
@@ -393,11 +441,13 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (activePointerId !== null && event.pointerId !== activePointerId) return;
   endDrag(event);
 }
 
 function onPointerCancel(event) {
   if (!draggedTile) return;
+  if (activePointerId !== null && event.pointerId !== activePointerId) return;
   endDrag(event);
 }
 
@@ -447,7 +497,9 @@ function randomizeStartingTiles() {
 tiles.forEach(tile => {
   tile.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
+    unlockAudio();
     draggedTile = tile;
+    activePointerId = event.pointerId;
     originalParent = tile.parentElement;
     originalNextSibling = tile.nextElementSibling;
 
@@ -456,7 +508,6 @@ tiles.forEach(tile => {
     offsetY = event.clientY - rect.top;
 
     event.preventDefault();
-    tile.setPointerCapture(event.pointerId);
     tile.style.position = 'fixed';
     const baseLeft = event.clientX - offsetX;
     const baseTop = event.clientY - offsetY;
@@ -473,8 +524,12 @@ tiles.forEach(tile => {
     document.body.appendChild(tile);
 
     playTileMoveSound();
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
+    tile.addEventListener('pointermove', onPointerMove);
+    tile.addEventListener('pointerup', onPointerUp);
+    tile.addEventListener('pointercancel', onPointerCancel);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerCancel);
   });
 });
 
