@@ -425,7 +425,7 @@ const GridTileView: React.FC<GridTileProps> = ({ row, col, type, pipeKind, broke
   
   return (
     <div
-      className={`absolute flex items-center justify-center rounded select-none text-xs font-mono overflow-hidden${type === 'bedrock' ? ' pointer-events-none' : ' cursor-default'}`}
+      className={`absolute flex items-center justify-center rounded select-none text-xs font-mono ${isVentSprayAdjacent ? 'overflow-visible' : 'overflow-hidden'}${type === 'bedrock' ? ' pointer-events-none' : ' cursor-default'}`}
       data-tile-key={tileKey}
       data-row={row}
       data-col={col}

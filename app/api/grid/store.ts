@@ -492,22 +492,16 @@ function getGridState(): GridState {
       const isActive = !damagedVentKeys.has(currentKey)
       if (isActive) {
         activeVentKeys.add(currentKey)
-        // Mark surrounding tiles (orthogonal + diagonal) as being sprayed.
-        const sprayDeltas = [
-          { row: -1, col: -1 },
-          { row: -1, col: 0 },
-          { row: -1, col: 1 },
-          { row: 0, col: -1 },
-          { row: 0, col: 1 },
-          { row: 1, col: -1 },
-          { row: 1, col: 0 },
-          { row: 1, col: 1 },
-        ]
-        for (const delta of sprayDeltas) {
-          const sprayKey = keyFor(row + delta.row, col + delta.col)
-          const sprayTile = store.gridMap.get(sprayKey)
-          if (sprayTile && sprayTile.type !== 'bedrock') {
-            ventSprayTileKeys.add(sprayKey)
+        // Mark a larger surrounding area as sprayed (radius 2, excluding the vent itself).
+        const sprayRadius = 2
+        for (let rowOffset = -sprayRadius; rowOffset <= sprayRadius; rowOffset += 1) {
+          for (let colOffset = -sprayRadius; colOffset <= sprayRadius; colOffset += 1) {
+            if (rowOffset === 0 && colOffset === 0) continue
+            const sprayKey = keyFor(row + rowOffset, col + colOffset)
+            const sprayTile = store.gridMap.get(sprayKey)
+            if (sprayTile && sprayTile.type !== 'bedrock') {
+              ventSprayTileKeys.add(sprayKey)
+            }
           }
         }
       }
