@@ -216,7 +216,7 @@ function getTileColors(type: TileType): { bg: string; border: string; text: stri
   }
 }
 
-const SPRITE_IMAGE_URL = "url('/tile sprites.png')"
+const SPRITE_IMAGE_URL = "url('/tile-sprites.png')"
 const WATER_TILE_IMAGE_URL = "url('/water.png')"
 const LAVA_TILE_IMAGE_URL = "url('/lava.png')"
 const CLOSED_Q_IMAGE_URL = "url('/closed-q.png')"
@@ -623,8 +623,16 @@ const DiamondGrid: React.FC = () => {
   const [portalLinks, setPortalLinks] = useState<PortalLink[]>([])
   const [portalLinkDrag, setPortalLinkDrag] = useState<PortalLinkDragState | null>(null)
   const [isLoadingState, setIsLoadingState] = useState(true)
+  const [gridZoom, setGridZoom] = useState(1)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const gridViewportRef = useRef<HTMLDivElement | null>(null)
+  const gridPanRef = useRef<{
+    pointerId: number
+    startClientX: number
+    startClientY: number
+    startScrollLeft: number
+    startScrollTop: number
+  } | null>(null)
   const hasCenteredOnSourceRef = useRef(false)
   const previousRoundRef = useRef<number | null>(null)
   const heatLevelRef = useRef(0)
@@ -637,6 +645,7 @@ const DiamondGrid: React.FC = () => {
   const audioUnlockedRef = useRef(false)
   const movePlayingRef = useRef(false)
   const konamiIndexRef = useRef(0)
+  const [isPanningGrid, setIsPanningGrid] = useState(false)
 
   const playerLabels = ['Player 1', 'Player 2', 'Player 3', 'Player 4'] as const
 
@@ -1042,13 +1051,103 @@ const DiamondGrid: React.FC = () => {
     }
   }
 
+  const zoomPercent = Math.round(gridZoom * 100)
+
+  const adjustGridZoom = (delta: number) => {
+    setGridZoom(current => {
+      const next = Number((current + delta).toFixed(2))
+      return Math.min(1.8, Math.max(0.6, next))
+    })
+  }
+
+  const resetGridZoom = () => {
+    setGridZoom(1)
+  }
+
   const clientToGridPoint = (clientX: number, clientY: number): { x: number; y: number } | null => {
     const rect = gridRef.current?.getBoundingClientRect()
     if (!rect) return null
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
+      x: (clientX - rect.left) / gridZoom,
+      y: (clientY - rect.top) / gridZoom,
     }
+  }
+
+  const handleGridViewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+
+    const target = event.target as HTMLElement | null
+    const startedOnInteractive = Boolean(target?.closest('button, input, textarea, select, [role="button"], [data-no-grid-pan="true"]'))
+    if (startedOnInteractive) return
+
+    const viewport = gridViewportRef.current
+    if (!viewport) return
+
+    gridPanRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startScrollLeft: viewport.scrollLeft,
+      startScrollTop: viewport.scrollTop,
+    }
+    setIsPanningGrid(true)
+    viewport.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }
+
+  const handleGridViewportPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = gridPanRef.current
+    const viewport = gridViewportRef.current
+    if (!pan || !viewport || pan.pointerId !== event.pointerId) return
+
+    const deltaX = event.clientX - pan.startClientX
+    const deltaY = event.clientY - pan.startClientY
+    viewport.scrollLeft = pan.startScrollLeft - deltaX
+    viewport.scrollTop = pan.startScrollTop - deltaY
+    event.preventDefault()
+  }
+
+  const endGridViewportPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = gridPanRef.current
+    const viewport = gridViewportRef.current
+    if (!pan || !viewport || pan.pointerId !== event.pointerId) return
+
+    if (viewport.hasPointerCapture(event.pointerId)) {
+      viewport.releasePointerCapture(event.pointerId)
+    }
+    gridPanRef.current = null
+    setIsPanningGrid(false)
+  }
+
+  const handleGridViewportWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const viewport = gridViewportRef.current
+    if (!viewport) return
+
+    if (!event.ctrlKey) {
+      return
+    }
+
+    event.preventDefault()
+
+    const rect = viewport.getBoundingClientRect()
+    const cursorX = event.clientX - rect.left
+    const cursorY = event.clientY - rect.top
+    const zoomDelta = -event.deltaY * 0.0025
+
+    setGridZoom(current => {
+      const next = Math.min(1.8, Math.max(0.6, Number((current + zoomDelta).toFixed(2))))
+      if (next === current) return current
+
+      const worldX = (viewport.scrollLeft + cursorX) / current
+      const worldY = (viewport.scrollTop + cursorY) / current
+
+      window.requestAnimationFrame(() => {
+        viewport.scrollLeft = worldX * next - cursorX
+        viewport.scrollTop = worldY * next - cursorY
+      })
+
+      return next
+    })
   }
 
   const getPortalDotPosition = (tileKey: string, kind: 'portal-entrance' | 'portal-exit'): { x: number; y: number } => {
@@ -1619,6 +1718,29 @@ const DiamondGrid: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg border border-amber-700 bg-[#2a1f14] px-2 py-1">
+              <button
+                onClick={() => adjustGridZoom(-0.1)}
+                className="rounded border border-amber-700 bg-[#1a1410] px-2 text-sm font-bold text-amber-200 transition hover:border-amber-500 hover:text-amber-100"
+                aria-label="Zoom out"
+              >
+                -
+              </button>
+              <button
+                onClick={resetGridZoom}
+                className="rounded border border-amber-700 bg-[#1a1410] px-2 text-xs font-semibold text-amber-200 transition hover:border-amber-500 hover:text-amber-100"
+                aria-label="Reset zoom"
+              >
+                {zoomPercent}%
+              </button>
+              <button
+                onClick={() => adjustGridZoom(0.1)}
+                className="rounded border border-amber-700 bg-[#1a1410] px-2 text-sm font-bold text-amber-200 transition hover:border-amber-500 hover:text-amber-100"
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+            </div>
             <button
               onClick={handleSwitchPlayer}
               className="rounded-lg border border-sky-600 bg-sky-950 px-3 py-1.5 text-sm font-semibold text-sky-200 transition hover:border-sky-400 hover:bg-sky-900"
@@ -1655,17 +1777,33 @@ const DiamondGrid: React.FC = () => {
         </div>
 
         <div className="min-h-0 flex-1 w-full overflow-hidden rounded-lg border border-amber-700 bg-[#1a1410]">
-          <div ref={gridViewportRef} className="custom-scrollbar h-full w-full overflow-auto">
-            <div className="mx-auto w-max">
           <div
-            ref={gridRef}
-            className="relative"
-            data-grid-drop-zone="true"
-            style={{
-              width: isLoadingState ? reservedGridWidth : containerWidth,
-              height: isLoadingState ? reservedGridHeight : containerHeight,
-            }}
+            ref={gridViewportRef}
+            className={`custom-scrollbar h-full w-full overflow-auto ${isPanningGrid ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+            onPointerDown={handleGridViewportPointerDown}
+            onPointerMove={handleGridViewportPointerMove}
+            onPointerUp={endGridViewportPan}
+            onPointerCancel={endGridViewportPan}
+            onWheel={handleGridViewportWheel}
           >
+            <div className="mx-auto w-max">
+              <div
+                style={{
+                  width: (isLoadingState ? reservedGridWidth : containerWidth) * gridZoom,
+                  height: (isLoadingState ? reservedGridHeight : containerHeight) * gridZoom,
+                }}
+              >
+                <div
+                  ref={gridRef}
+                  className="relative"
+                  data-grid-drop-zone="true"
+                  style={{
+                    width: isLoadingState ? reservedGridWidth : containerWidth,
+                    height: isLoadingState ? reservedGridHeight : containerHeight,
+                    transform: `scale(${gridZoom})`,
+                    transformOrigin: 'top left',
+                  }}
+                >
             {isLoadingState ? (
               <div className="absolute inset-0 flex items-center justify-center p-8">
                 <div className="w-full max-w-xl overflow-hidden rounded-lg border border-amber-700 bg-amber-900">
@@ -1736,8 +1874,9 @@ const DiamondGrid: React.FC = () => {
                 )
               })}
             </svg>
-          </div>
-        </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1767,8 +1906,8 @@ const DiamondGrid: React.FC = () => {
                               left: dragState.x,
                               top: dragState.y,
                               transform: 'translate(-50%, -50%)',
-                              width: dragState.isOverGrid ? TILE_SIZE : undefined,
-                              height: dragState.isOverGrid ? TILE_SIZE : undefined,
+                              width: dragState.isOverGrid ? TILE_SIZE * gridZoom : undefined,
+                              height: dragState.isOverGrid ? TILE_SIZE * gridZoom : undefined,
                               zIndex: 1000,
                               pointerEvents: 'none',
                               boxShadow: '0 0 12px rgba(212,168,90,0.75)',
@@ -1807,8 +1946,8 @@ const DiamondGrid: React.FC = () => {
                   left: dragState.x,
                   top: dragState.y,
                   transform: 'translate(-50%, -50%)',
-                  width: dragState.isOverGrid ? TILE_SIZE : undefined,
-                  height: dragState.isOverGrid ? TILE_SIZE : undefined,
+                  width: dragState.isOverGrid ? TILE_SIZE * gridZoom : undefined,
+                  height: dragState.isOverGrid ? TILE_SIZE * gridZoom : undefined,
                   zIndex: 1000,
                   pointerEvents: 'none',
                   boxShadow: '0 0 12px rgba(251,113,133,0.75)',
