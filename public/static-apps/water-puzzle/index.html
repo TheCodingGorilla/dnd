@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aztec Temple Water Maze</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Marcellus&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="top-bar">
+        <div>
+          <h1>Aztec Temple Water Maze</h1>
+          <p>Guide sacred river flow from IN to OUT through carved stone paths.</p>
+        </div>
+        <div class="controls">
+          <label>
+            Level
+            <select id="levelSelect"></select>
+          </label>
+          <button id="reloadLevelBtn" type="button">Reload Level</button>
+          <button id="clearBtn" type="button">Clear Grid Tiles</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <section class="board-wrap">
+          <div class="board-layout">
+            <div id="boardStage" class="board-stage">
+              <div id="inMarker" class="endpoint-marker in">IN</div>
+              <div id="outMarker" class="endpoint-marker out">OUT</div>
+              <div id="grid" class="grid" aria-label="25 by 25 puzzle grid"></div>
+            </div>
+
+            <aside class="flow-meter" aria-label="Flow amount meter">
+              <h3>Flow</h3>
+              <div class="meter-frame">
+                <div id="flowMeterScale" class="meter-scale"></div>
+                <div class="meter-pipe">
+                  <div id="flowMeterFill" class="meter-fill">
+                    <div id="flowMeterBladder" class="meter-bladder"></div>
+                  </div>
+                </div>
+              </div>
+              <div id="flowMeterValue" class="meter-value">0.0</div>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <footer class="status-bar">
+        <div id="statusText">Water flows continuously. Place tiles to guide it.</div>
+      </footer>
+    </main>
+
+    <script src="levels.js"></script>
+    <script src="constants.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

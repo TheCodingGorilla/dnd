@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Level Builder – Water Maze</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Marcellus&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Base ──────────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Marcellus", serif;
+      background: #17100b;
+      color: #f4e7c9;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3 { font-family: "Cinzel", serif; letter-spacing: 0.07em; }
+
+    input, select, textarea, button { font-family: inherit; font-size: 0.9rem; }
+
+    a { color: #e9b44c; }
+
+    /* ── Layout ─────────────────────────────────────────────────────────────── */
+    header {
+      padding: 14px 20px;
+      border-bottom: 1px solid rgba(233,180,76,0.3);
+      background: rgba(0,0,0,0.3);
+    }
+
+    header p { margin-top: 4px; color: #d5c39c; font-size: 0.9rem; }
+
+    .main-layout {
+      display: grid;
+      grid-template-columns: 220px 1fr 240px;
+      gap: 14px;
+      padding: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      background: rgba(57,39,27,0.85);
+      border: 1px solid rgba(233,180,76,0.25);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .panel h2 { font-size: 1rem; margin-bottom: 10px; color: #e9b44c; }
+    .panel h3 { font-size: 0.85rem; margin: 10px 0 6px; color: #d5c39c; }
+
+    /* ── Config panel ────────────────────────────────────────────────────────── */
+    .config-panel label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.8rem;
+      color: #d5c39c;
+      margin-bottom: 8px;
+    }
+
+    .config-panel input,
+    .config-panel select {
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(233,180,76,0.3);
+      color: #f4e7c9;
+      border-radius: 6px;
+      padding: 5px 7px;
+    }
+
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+    hr { border: none; border-top: 1px solid rgba(233,180,76,0.2); margin: 10px 0; }
+
+    /* ── Grid panel ──────────────────────────────────────────────────────────── */
+    .grid-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+
+    .mode-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .mode-btn {
+      padding: 5px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(233,180,76,0.35);
+      background: rgba(0,0,0,0.3);
+      color: #d5c39c;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+
+    .mode-btn.active   { background: #3a9b8f; color: #fff; border-color: #3a9b8f; }
+    .mode-btn.active-in  { background: #e9b44c; color: #402100; border-color: #e9b44c; }
+    .mode-btn.active-out { background: #2f8f83; color: #fff; border-color: #2f8f83; }
+
+    #modeHint { font-size: 0.78rem; color: #d5c39c; min-height: 1.1em; }
+
+    /* ── Builder grid ────────────────────────────────────────────────────────── */
+    #builderGrid {
+      display: grid;
+      gap: 3px;
+      padding: 8px;
+      background: rgba(17,11,8,0.5);
+      border: 1px solid rgba(233,180,76,0.25);
+      border-radius: 10px;
+    }
+
+    .gc {
+      width: 44px; height: 44px;
+      border-radius: 5px;
+      border: 1px solid rgba(230,204,161,0.28);
+      background: rgba(150,114,79,0.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.65rem; font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+      transition: opacity 0.1s;
+      position: relative;
+    }
+
+    .gc:hover  { opacity: 0.75; }
+
+    .gc.is-wall {
+      background: repeating-linear-gradient(
+        45deg, #5f4634 0 4px, #7b5c44 4px 8px
+      );
+    }
+
+    .gc.is-rock {
+      background: radial-gradient(circle at 30% 30%, #8f7a61, #5f4b37);
+    }
+
+    .gc.is-in {
+      background: linear-gradient(180deg, #e9b44c, #cc8f2d);
+      color: #402100;
+      font-size: 0.72rem;
+    }
+
+    .gc.is-out {
+      background: linear-gradient(180deg, #47bdb2, #2f8f83);
+      color: #0f2b28;
+      font-size: 0.72rem;
+    }
+
+    /* highlight edge cells when in IN/OUT mode */
+    .gc.edge-hint {
+      outline: 2px dashed rgba(255,255,255,0.35);
+      outline-offset: -3px;
+    }
+
+    /* ── Tile panel ──────────────────────────────────────────────────────────── */
+    .tiles-panel { display: flex; flex-direction: column; gap: 8px; }
+
+    #tileButtons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+    }
+
+    .add-tile-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      border: 1px solid rgba(0,0,0,0.25);
+      border-radius: 8px;
+      padding: 6px 4px;
+      cursor: pointer;
+      font-size: 0.68rem;
+      color: #1a0e07;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .add-tile-btn:hover { filter: brightness(1.1); }
+
+    .t-glyph { font-size: 1.3rem; line-height: 1; }
+
+    #tileList { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+
+    .tile-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0,0,0,0.25);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 0.8rem;
+    }
+
+    .tile-row-glyph { font-size: 1.1rem; margin-right: 5px; }
+
+    .remove-btn {
+      background: none;
+      border: none;
+      color: #b5473e;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0 2px;
+    }
+
+    .remove-btn:hover { color: #e05050; }
+
+    #clearTiles {
+      padding: 5px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(181,71,62,0.5);
+      background: rgba(181,71,62,0.18);
+      color: #f4e7c9;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+
+    /* ── Output panel ────────────────────────────────────────────────────────── */
+    .output-panel {
+      margin: 0 14px 14px;
+      padding: 14px;
+      background: rgba(57,39,27,0.85);
+      border: 1px solid rgba(233,180,76,0.25);
+      border-radius: 12px;
+    }
+
+    .output-panel h2 { font-size: 1rem; color: #e9b44c; margin-bottom: 4px; }
+    .output-panel p  { font-size: 0.82rem; color: #d5c39c; margin-bottom: 8px; }
+
+    .output-panel code {
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: monospace;
+    }
+
+    #codeOutput {
+      width: 100%;
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(233,180,76,0.22);
+      color: #9fd6cb;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: "Courier New", monospace;
+      font-size: 0.82rem;
+      resize: vertical;
+    }
+
+    .copy-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+
+    #copyBtn {
+      padding: 7px 16px;
+      border-radius: 20px;
+      border: none;
+      background: linear-gradient(180deg, #3a9b8f, #2f7d73);
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+
+    #copyBtn:hover { filter: brightness(1.08); }
+
+    #copyMsg { font-size: 0.82rem; color: #74c69d; display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Level Builder</h1>
+  <p>Design a level, then paste the generated code into <code>levels.js</code>.</p>
+</header>
+
+<div class="main-layout">
+
+  <!-- ── Config ── -->
+  <section class="panel config-panel">
+    <h2>Level Config</h2>
+
+    <label>ID
+      <input id="levelId" type="text" value="level-new" />
+    </label>
+    <label>Name
+      <input id="levelName" type="text" value="New Level" />
+    </label>
+
+    <div class="row2">
+      <label>Rows
+        <input id="levelRows" type="number" min="3" max="30" value="5" />
+      </label>
+      <label>Cols
+        <input id="levelCols" type="number" min="3" max="30" value="5" />
+      </label>
+    </div>
+
+    <label>Base Flow (spring rate)
+      <input id="levelFlow" type="number" min="1" max="99" value="6" />
+    </label>
+
+    <hr />
+    <h3>IN (water source)</h3>
+    <div class="row2">
+      <label>Side
+        <select id="inSide">
+          <option value="top" selected>Top</option>
+          <option value="right">Right</option>
+          <option value="bottom">Bottom</option>
+          <option value="left">Left</option>
+        </select>
+      </label>
+      <label>Index
+        <input id="inIndex" type="number" min="0" value="1" />
+      </label>
+    </div>
+
+    <h3>OUT (water exit)</h3>
+    <div class="row2">
+      <label>Side
+        <select id="outSide">
+          <option value="top">Top</option>
+          <option value="right" selected>Right</option>
+          <option value="bottom">Bottom</option>
+          <option value="left">Left</option>
+        </select>
+      </label>
+      <label>Index
+        <input id="outIndex" type="number" min="0" value="3" />
+      </label>
+    </div>
+  </section>
+
+  <!-- ── Grid ── -->
+  <section class="panel grid-panel">
+    <div class="mode-bar">
+      <button id="modeObstacle" class="mode-btn active">✏ Paint Obstacles</button>
+      <button id="modeIn"       class="mode-btn">⬤ Set IN</button>
+      <button id="modeOut"      class="mode-btn">⬤ Set OUT</button>
+    </div>
+    <p id="modeHint">Click cells to cycle: empty → wall → rock</p>
+    <div id="builderGrid"></div>
+  </section>
+
+  <!-- ── Tiles ── -->
+  <section class="panel tiles-panel">
+    <h2>Tile Inventory</h2>
+    <p style="font-size:0.78rem;color:#d5c39c">Click to add tiles to the level</p>
+    <div id="tileButtons"></div>
+
+    <hr />
+
+    <h3>Added tiles (<span id="tileCount">0</span>)</h3>
+    <div id="tileList"></div>
+    <button id="clearTiles">Clear all</button>
+  </section>
+
+</div>
+
+<!-- ── Output ── -->
+<section class="output-panel">
+  <h2>Generated Level Code</h2>
+  <p>Paste inside the array in <code>levels.js</code> → <code>window.WATER_LEVELS = [ … ]</code></p>
+  <textarea id="codeOutput" rows="15" readonly></textarea>
+  <div class="copy-row">
+    <button id="copyBtn">Copy to Clipboard</button>
+    <span id="copyMsg">Copied!</span>
+  </div>
+</section>
+
+<script>
+// ─── Tile definitions (mirrors constants.js) ─────────────────────────────────
+const TILE_GLYPHS = {
+  "straight-v": "│", "straight-h": "─",
+  "corner-ne":  "└", "corner-es":  "┌",
+  "corner-sw":  "┐", "corner-wn":  "┘",
+  "sluice-v":   "S", "sluice-h":   "S",
+  "bridge-v":   "║", "bridge-h":   "═"
+};
+
+const TILE_LABELS = {
+  "straight-v": "Straight ↕",  "straight-h": "Straight ↔",
+  "corner-ne":  "Turn ↱ N→E",   "corner-es":  "Turn ↴ E→S",
+  "corner-sw":  "Turn ↲ S→W",   "corner-wn":  "Turn ↰ W→N",
+  "sluice-v":   "Sluice ↕",     "sluice-h":   "Sluice ↔",
+  "bridge-v":   "Bridge ↕",     "bridge-h":   "Bridge ↔"
+};
+
+const TILE_COLORS = {
+  "straight-v": "#d7b98a", "straight-h": "#d7b98a",
+  "corner-ne":  "#d9b270", "corner-es":  "#d9b270",
+  "corner-sw":  "#d9b270", "corner-wn":  "#d9b270",
+  "sluice-v":   "#e3a34f", "sluice-h":   "#e3a34f",
+  "bridge-v":   "#c2b18f", "bridge-h":   "#c2b18f"
+};
+
+// ─── Builder State ────────────────────────────────────────────────────────────
+const b = {
+  id:       "level-new",
+  name:     "New Level",
+  rows:     5,
+  cols:     5,
+  baseFlow: 6,
+  start: { side: "top",   index: 1 },
+  end:   { side: "right", index: 3 },
+  obstacles: new Map(), // "r,c" → "wall" | "rock"
+  tiles:     [],        // [{type}]
+  mode:      "obstacle" // "obstacle" | "in" | "out"
+};
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const gridEl      = document.getElementById("builderGrid");
+const tileListEl  = document.getElementById("tileList");
+const tileCountEl = document.getElementById("tileCount");
+const codeEl      = document.getElementById("codeOutput");
+const modeHintEl  = document.getElementById("modeHint");
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function endpointToCell(side, index, rows, cols) {
+  if (side === "top")    return { r: 0,         c: clamp(index, 0, cols - 1) };
+  if (side === "bottom") return { r: rows - 1,  c: clamp(index, 0, cols - 1) };
+  if (side === "left")   return { r: clamp(index, 0, rows - 1), c: 0 };
+  return                        { r: clamp(index, 0, rows - 1), c: cols - 1 };
+}
+
+function cellToEndpoint(r, c, rows, cols) {
+  if (r === 0)        return { side: "top",    index: c };
+  if (r === rows - 1) return { side: "bottom", index: c };
+  if (c === 0)        return { side: "left",   index: r };
+  if (c === cols - 1) return { side: "right",  index: r };
+  return null; // interior cell
+}
+
+function isEdge(r, c) {
+  return r === 0 || r === b.rows - 1 || c === 0 || c === b.cols - 1;
+}
+
+// ─── Grid Rendering ───────────────────────────────────────────────────────────
+function renderGrid() {
+  const inCell  = endpointToCell(b.start.side, b.start.index, b.rows, b.cols);
+  const outCell = endpointToCell(b.end.side,   b.end.index,   b.rows, b.cols);
+
+  gridEl.style.gridTemplateColumns = `repeat(${b.cols}, 44px)`;
+  gridEl.innerHTML = "";
+
+  for (let r = 0; r < b.rows; r++) {
+    for (let c = 0; c < b.cols; c++) {
+      const cell = document.createElement("div");
+      cell.className = "gc";
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+
+      const isIn  = r === inCell.r  && c === inCell.c;
+      const isOut = r === outCell.r && c === outCell.c;
+      const obs   = b.obstacles.get(`${r},${c}`);
+
+      if (isIn)  { cell.classList.add("is-in");   cell.textContent = "IN"; }
+      else if (isOut) { cell.classList.add("is-out"); cell.textContent = "OUT"; }
+      else if (obs === "wall") { cell.classList.add("is-wall"); }
+      else if (obs === "rock") { cell.classList.add("is-rock"); cell.textContent = "⬟"; }
+
+      if (b.mode !== "obstacle" && isEdge(r, c) && !isIn && !isOut) {
+        cell.classList.add("edge-hint");
+      }
+
+      cell.addEventListener("click", () => handleCellClick(r, c));
+      gridEl.appendChild(cell);
+    }
+  }
+}
+
+// ─── Cell Click ───────────────────────────────────────────────────────────────
+function handleCellClick(r, c) {
+  const inCell  = endpointToCell(b.start.side,  b.start.index, b.rows, b.cols);
+  const outCell = endpointToCell(b.end.side, b.end.index, b.rows, b.cols);
+  const onIn  = r === inCell.r  && c === inCell.c;
+  const onOut = r === outCell.r && c === outCell.c;
+
+  if (b.mode === "in") {
+    if (!isEdge(r, c)) return;
+    const ep = cellToEndpoint(r, c, b.rows, b.cols);
+    b.start = ep;
+    document.getElementById("inSide").value  = ep.side;
+    document.getElementById("inIndex").value = ep.index;
+    update();
+    return;
+  }
+
+  if (b.mode === "out") {
+    if (!isEdge(r, c)) return;
+    const ep = cellToEndpoint(r, c, b.rows, b.cols);
+    b.end = ep;
+    document.getElementById("outSide").value  = ep.side;
+    document.getElementById("outIndex").value = ep.index;
+    update();
+    return;
+  }
+
+  // obstacle mode — cannot paint IN/OUT cells
+  if (onIn || onOut) return;
+
+  const key = `${r},${c}`;
+  const cur  = b.obstacles.get(key) || "none";
+  const next = { none: "wall", wall: "rock", rock: "none" }[cur];
+  if (next === "none") b.obstacles.delete(key);
+  else b.obstacles.set(key, next);
+
+  update();
+}
+
+// ─── Tile List ────────────────────────────────────────────────────────────────
+function renderTileList() {
+  tileListEl.innerHTML = "";
+  b.tiles.forEach((t, i) => {
+    const row = document.createElement("div");
+    row.className = "tile-row";
+
+    const left = document.createElement("span");
+    left.innerHTML = `<span class="tile-row-glyph">${TILE_GLYPHS[t.type]}</span>${TILE_LABELS[t.type]}`;
+
+    const rm = document.createElement("button");
+    rm.textContent = "×";
+    rm.className = "remove-btn";
+    rm.addEventListener("click", () => { b.tiles.splice(i, 1); renderTileList(); generateCode(); });
+
+    row.appendChild(left);
+    row.appendChild(rm);
+    tileListEl.appendChild(row);
+  });
+  tileCountEl.textContent = b.tiles.length;
+}
+
+// ─── Code Generator ───────────────────────────────────────────────────────────
+function generateCode() {
+  const obs = [];
+  b.obstacles.forEach((type, key) => {
+    const [r, c] = key.split(",").map(Number);
+    obs.push(`      { row: ${r}, col: ${c}, type: "${type}" }`);
+  });
+
+  const tilesCode = b.tiles.length
+    ? "\n" + b.tiles.map(t => `      { type: "${t.type}" }`).join(",\n") + "\n    "
+    : "";
+
+  const obsCode = obs.length
+    ? "\n" + obs.join(",\n") + "\n    "
+    : "";
+
+  codeEl.value =
+`  {
+    id:       "${b.id}",
+    name:     "${b.name}",
+    rows:     ${b.rows},
+    cols:     ${b.cols},
+    start:    { side: "${b.start.side}", index: ${b.start.index} },
+    end:      { side: "${b.end.side}",   index: ${b.end.index} },
+    baseFlow: ${b.baseFlow},
+    tiles: [${tilesCode}],
+    obstacles: [${obsCode}]
+  }`;
+}
+
+// ─── Full Update ──────────────────────────────────────────────────────────────
+function update() { renderGrid(); generateCode(); }
+
+// ─── Read Config Inputs ───────────────────────────────────────────────────────
+function readMeta() {
+  b.id       = document.getElementById("levelId").value.trim()   || "level-new";
+  b.name     = document.getElementById("levelName").value.trim() || "New Level";
+  const newRows = clamp(Number(document.getElementById("levelRows").value) || 5, 3, 30);
+  const newCols = clamp(Number(document.getElementById("levelCols").value) || 5, 3, 30);
+
+  // Clamp obstacles + endpoints when grid shrinks
+  if (newRows !== b.rows || newCols !== b.cols) {
+    b.rows = newRows;
+    b.cols = newCols;
+    // Remove out-of-bounds obstacles
+    for (const key of [...b.obstacles.keys()]) {
+      const [r, c] = key.split(",").map(Number);
+      if (r >= b.rows || c >= b.cols) b.obstacles.delete(key);
+    }
+    // Clamp endpoints
+    b.start.index = clamp(b.start.index, 0, (b.start.side === "top" || b.start.side === "bottom") ? b.cols - 1 : b.rows - 1);
+    b.end.index   = clamp(b.end.index,   0, (b.end.side   === "top" || b.end.side   === "bottom") ? b.cols - 1 : b.rows - 1);
+  } else {
+    b.rows = newRows;
+    b.cols = newCols;
+  }
+
+  b.baseFlow = Math.max(1, Number(document.getElementById("levelFlow").value) || 6);
+}
+
+function readEndpoints() {
+  b.start = {
+    side:  document.getElementById("inSide").value,
+    index: Math.max(0, Number(document.getElementById("inIndex").value) || 0)
+  };
+  b.end = {
+    side:  document.getElementById("outSide").value,
+    index: Math.max(0, Number(document.getElementById("outIndex").value) || 0)
+  };
+}
+
+// ─── Wire Config Inputs ───────────────────────────────────────────────────────
+["levelId","levelName","levelRows","levelCols","levelFlow"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => { readMeta(); update(); });
+});
+
+["inSide","inIndex","outSide","outIndex"].forEach(id => {
+  document.getElementById(id).addEventListener("change", () => { readEndpoints(); update(); });
+});
+
+// ─── Mode Buttons ────────────────────────────────────────────────────────────
+const modeHints = {
+  obstacle: "Click cells to cycle: empty → wall → rock",
+  in:       "Click any edge cell to place the IN entry point",
+  out:      "Click any edge cell to place the OUT exit point"
+};
+
+["modeObstacle","modeIn","modeOut"].forEach(id => {
+  document.getElementById(id).addEventListener("click", () => {
+    b.mode = id === "modeObstacle" ? "obstacle" : id === "modeIn" ? "in" : "out";
+
+    document.querySelectorAll(".mode-btn").forEach(btn => {
+      btn.classList.remove("active","active-in","active-out");
+    });
+    const cls = b.mode === "in" ? "active-in" : b.mode === "out" ? "active-out" : "active";
+    document.getElementById(id).classList.add(cls);
+    modeHintEl.textContent = modeHints[b.mode];
+    update();
+  });
+});
+
+// ─── Tile Type Buttons ────────────────────────────────────────────────────────
+const tileBtnsEl = document.getElementById("tileButtons");
+Object.entries(TILE_LABELS).forEach(([type, label]) => {
+  const btn = document.createElement("button");
+  btn.className = "add-tile-btn";
+  btn.style.background = TILE_COLORS[type];
+  btn.title = `Add ${label}`;
+  btn.innerHTML = `<span class="t-glyph">${TILE_GLYPHS[type]}</span><span>${label}</span>`;
+  btn.addEventListener("click", () => {
+    b.tiles.push({ type });
+    renderTileList();
+    generateCode();
+  });
+  tileBtnsEl.appendChild(btn);
+});
+
+document.getElementById("clearTiles").addEventListener("click", () => {
+  b.tiles = [];
+  renderTileList();
+  generateCode();
+});
+
+// ─── Copy Button ──────────────────────────────────────────────────────────────
+document.getElementById("copyBtn").addEventListener("click", () => {
+  navigator.clipboard.writeText(codeEl.value).then(() => {
+    const msg = document.getElementById("copyMsg");
+    msg.style.display = "inline";
+    setTimeout(() => { msg.style.display = "none"; }, 1800);
+  });
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+update();
+renderTileList();
+generateCode();
+</script>
+
+</body>
+</html>
