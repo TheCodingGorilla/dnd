@@ -6,6 +6,7 @@ import { type GridTile, type TileType } from '@/app/utils/gridConfig'
 const TILE_SIZE = 96
 const TILE_MARGIN = 2
 const GRID_PADDING = 16
+const KONAMI_SEQUENCE = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'] as const
 
 type PipeKind =
   | 'horizontal'
@@ -25,7 +26,7 @@ type PipeKind =
   | 'portal-exit'
 
 type Direction = 'top' | 'right' | 'bottom' | 'left'
-type PlacementSource = 'palette' | 'bank'
+type PlacementSource = 'palette'
 type DragSource = PlacementSource | 'delete'
 
 interface PipePlacement {
@@ -61,6 +62,11 @@ interface RoundEvent {
   message: string
 }
 
+interface PaletteEntry {
+  kind: PipeKind
+  brokenOriginalKind?: PipeKind
+}
+
 interface GridApiState {
   tiles: GridTile[]
   pipes: PipePlacement[]
@@ -70,8 +76,8 @@ interface GridApiState {
   portalLinks: PortalLink[]
   roundEvent: RoundEvent | null
   round: number
-  palette: PipeKind[]
-  tileBank: PipeKind | null
+  palette: PaletteEntry[]
+  brokenPipeKinds?: Array<[string, PipeKind]>
 }
 
 function isGridApiState(payload: unknown): payload is GridApiState {
@@ -93,10 +99,12 @@ interface PipeOption {
   kind: PipeKind
   label: string
   symbol: string
+  brokenOriginalKind?: PipeKind
 }
 
 interface DragState {
   pipeKind: PipeKind
+  brokenOriginalKind?: PipeKind
   symbol: string
   source: DragSource
   paletteIndex: number | null
@@ -104,7 +112,6 @@ interface DragState {
   y: number
   hoveredTileKey: string | null
   isOverGrid: boolean
-  isOverBank: boolean
 }
 
 interface PortalLinkDragState {
@@ -237,13 +244,33 @@ const PIPE_SPRITE_CONFIG: Record<PipeKind, SpriteConfig> = {
   'corner-right-bottom': { position: pipeSpriteAt(1, 0) },
   't-open-left': { position: '-192px -1px' },
   't-open-right': { position: '-193px -2px' },
-  't-open-top': { position: '-189px -1px' },
+  't-open-top': { position: '-192px -1px' },
   't-open-bottom': { position: '-192px 0px' },
   cross: { position: '-288px -1px' },
   broken: { position: '-386px -1px' },
   'quench-vent': { position: '-3px -192px', size: '486px 294px' },
   'portal-entrance': { position: pipeSpriteAt(3, 1) },
   'portal-exit': { position: '-387px -98px' },
+}
+
+const BROKEN_PIPE_SPRITE_CONFIG: Record<PipeKind, string | undefined> = {
+  horizontal: undefined,
+  vertical: '-386px -2px',
+  // Base broken corner is "right-bottom"; other corners rotate from this sprite.
+  'corner-left-top': '-1px -97px',
+  'corner-left-bottom': '-1px -97px',
+  'corner-right-top': '-1px -97px',
+  'corner-right-bottom': '-1px -97px',
+  // Base broken T is "down"; other T directions rotate from this sprite.
+  't-open-left': '-99px -97px',
+  't-open-right': '-99px -97px',
+  't-open-top': '-99px -97px',
+  't-open-bottom': '-99px -97px',
+  cross: '-194px -98px',
+  broken: '-386px -1px',
+  'quench-vent': undefined,
+  'portal-entrance': undefined,
+  'portal-exit': undefined,
 }
 
 const BEDROCK_SPRITE_CONFIG: SpriteConfig = {
@@ -256,8 +283,24 @@ const ROOM_SPRITE_CONFIG: SpriteConfig = {
   size: '486px 294px',
 }
 
-function getSpriteBackgroundPosition(pipeKind: PipeKind | undefined, type: TileType): { backgroundImage: string; backgroundPosition: string; backgroundSize: string; backgroundRepeat: string } | null {
+function getSpriteBackgroundPosition(pipeKind: PipeKind | undefined, type: TileType, brokenPipeKinds?: Map<string, PipeKind>, tileKey?: string): { backgroundImage: string; backgroundPosition: string; backgroundSize: string; backgroundRepeat: string } | null {
   if (pipeKind) {
+    // If this is a broken pipe, use the broken sprite for its original kind
+    if (pipeKind === 'broken' && brokenPipeKinds && tileKey) {
+      const originalKind = brokenPipeKinds.get(tileKey)
+      if (originalKind && originalKind !== 'broken') {
+        const brokenPosition = BROKEN_PIPE_SPRITE_CONFIG[originalKind]
+        if (brokenPosition) {
+          return {
+            backgroundImage: SPRITE_IMAGE_URL,
+            backgroundPosition: brokenPosition,
+            backgroundSize: PIPE_SPRITE_DEFAULT_SIZE,
+            backgroundRepeat: 'no-repeat',
+          }
+        }
+      }
+    }
+    
     const config = PIPE_SPRITE_CONFIG[pipeKind]
     return {
       backgroundImage: SPRITE_IMAGE_URL,
@@ -338,6 +381,7 @@ interface GridTileProps {
   col: number
   type: TileType
   pipeKind?: PipeKind
+  brokenPipeKinds: Map<string, PipeKind>
   isFlowActive: boolean
   isVentActive: boolean
   isVentSprayAdjacent: boolean
@@ -346,9 +390,15 @@ interface GridTileProps {
   isDropTarget: boolean
 }
 
-const GridTileView: React.FC<GridTileProps> = ({ row, col, type, pipeKind, isFlowActive, isVentActive, isVentSprayAdjacent, isDamagedVent, isValidDropSlot, isDropTarget }) => {
+const GridTileView: React.FC<GridTileProps> = ({ row, col, type, pipeKind, brokenPipeKinds, isFlowActive, isVentActive, isVentSprayAdjacent, isDamagedVent, isValidDropSlot, isDropTarget }) => {
   const colors = getTileColors(type)
   const isQuenchVent = pipeKind === 'quench-vent'
+  const tileKey = keyFor(row, col)
+  const originalBrokenKind = pipeKind === 'broken' ? brokenPipeKinds.get(tileKey) : undefined
+  const brokenOriginalRotation =
+    pipeKind === 'broken' && originalBrokenKind
+      ? getSpriteRotation(originalBrokenKind)
+      : undefined
   const spriteStyle = isQuenchVent
     ? (isDamagedVent
       ? {
@@ -358,19 +408,18 @@ const GridTileView: React.FC<GridTileProps> = ({ row, col, type, pipeKind, isFlo
           backgroundRepeat: 'no-repeat',
         }
       : isVentActive
-        ? getSpriteBackgroundPosition(pipeKind, type)
+        ? getSpriteBackgroundPosition(pipeKind, type, brokenPipeKinds, tileKey)
         : {
             backgroundImage: SPRITE_IMAGE_URL,
             backgroundPosition: '-100px -192px',
             backgroundSize: PIPE_SPRITE_DEFAULT_SIZE,
             backgroundRepeat: 'no-repeat',
           })
-    : getSpriteBackgroundPosition(pipeKind, type)
+    : getSpriteBackgroundPosition(pipeKind, type, brokenPipeKinds, tileKey)
   const usesAtlasSprite = Boolean(pipeKind || type === 'normal' || type === 'bedrock')
-  const spriteRotation = getSpriteRotation(pipeKind)
+  const spriteRotation = brokenOriginalRotation ?? getSpriteRotation(pipeKind)
   const hasPlacedPipe = Boolean(pipeKind)
   const showEmptySlotOverlay = type === 'empty' && !hasPlacedPipe
-  const tileKey = keyFor(row, col)
   const canAcceptPipe = (type === 'normal' || type === 'empty') && !isQuenchVent
   const quenchBackground = isDamagedVent ? '#7f1d1d' : '#8B6F47'
   
@@ -441,6 +490,10 @@ const GridTileView: React.FC<GridTileProps> = ({ row, col, type, pipeKind, isFlo
         <div className="disabled-q-cross" aria-hidden="true" />
       ) : null}
 
+      {pipeKind === 'broken' ? (
+        <div className="disabled-q-cross" aria-hidden="true" />
+      ) : null}
+
       {pipeKind && !spriteStyle ? (
         <span
           className="font-bold"
@@ -456,38 +509,45 @@ const GridTileView: React.FC<GridTileProps> = ({ row, col, type, pipeKind, isFlo
   )
 }
 
-function getPipePreviewStyle(kind: PipeKind): React.CSSProperties {
-  const config = PIPE_SPRITE_CONFIG[kind]
+function getPipePreviewStyle(kind: PipeKind, brokenOriginalKind?: PipeKind): React.CSSProperties {
+  if (kind === 'broken' && brokenOriginalKind) {
+    const brokenPosition = BROKEN_PIPE_SPRITE_CONFIG[brokenOriginalKind]
+    if (brokenPosition) {
+      return {
+        backgroundImage: SPRITE_IMAGE_URL,
+        backgroundPosition: brokenPosition,
+        backgroundSize: PIPE_SPRITE_DEFAULT_SIZE,
+        backgroundRepeat: 'no-repeat',
+        imageRendering: 'pixelated',
+        transform: getSpriteRotation(brokenOriginalKind),
+        transformOrigin: getSpriteRotation(brokenOriginalKind) ? 'center' : undefined,
+      }
+    }
+  }
 
+  const config = PIPE_SPRITE_CONFIG[kind]
   return {
     backgroundImage: SPRITE_IMAGE_URL,
     backgroundPosition: config.position,
     backgroundSize: config.size ?? PIPE_SPRITE_DEFAULT_SIZE,
     backgroundRepeat: 'no-repeat',
     imageRendering: 'pixelated',
+    transform: getSpriteRotation(kind),
+    transformOrigin: getSpriteRotation(kind) ? 'center' : undefined,
   }
 }
 
-async function sendPipeUpdate(row: number, col: number, pipeKind: PipeKind, source: PlacementSource): Promise<GridApiState | null> {
+async function sendPipeUpdate(
+  row: number,
+  col: number,
+  pipeKind: PipeKind,
+  source: PlacementSource,
+  brokenOriginalKind?: PipeKind,
+): Promise<GridApiState | null> {
   const response = await fetch('/api/grid/update', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ row, col, pipeKind, source }),
-  })
-  if (!response.ok) return null
-  try {
-    const payload = await response.json()
-    return normalizeGridStatePayload(payload)
-  } catch {
-    return null
-  }
-}
-
-async function sendBankTile(pipeKind: PipeKind): Promise<GridApiState | null> {
-  const response = await fetch('/api/grid/bank', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pipeKind }),
+    body: JSON.stringify({ row, col, pipeKind, source, brokenOriginalKind }),
   })
   if (!response.ok) return null
   try {
@@ -543,6 +603,7 @@ async function sendPortalLink(entranceRow: number, entranceCol: number, exitRow:
 const DiamondGrid: React.FC = () => {
   const [tiles, setTiles] = useState<GridTile[]>([])
   const [pipesByKey, setPipesByKey] = useState<Map<string, PipeKind>>(new Map())
+  const [brokenPipeKinds, setBrokenPipeKinds] = useState<Map<string, PipeKind>>(new Map())
   const [flow, setFlow] = useState<FlowState>({ activePipeKeys: [], activeVentKeys: [], ventSprayTileKeys: [], damagedVentKeys: [] })
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [round, setRound] = useState(1)
@@ -552,10 +613,13 @@ const DiamondGrid: React.FC = () => {
   const [showRoundAnnouncement, setShowRoundAnnouncement] = useState(false)
   const [roundAnnouncementTitle, setRoundAnnouncementTitle] = useState('')
   const [roundAnnouncementText, setRoundAnnouncementText] = useState('')
+  const [roundAnnouncementOutcome, setRoundAnnouncementOutcome] = useState<RoundEventOutcome>('nothing')
   const [showHeatWarning, setShowHeatWarning] = useState(false)
   const [heatWarningText, setHeatWarningText] = useState('')
+  const [showHeatRoundLockWarning, setShowHeatRoundLockWarning] = useState(false)
+  const [pendingEndRoundAfterHeatWarning, setPendingEndRoundAfterHeatWarning] = useState(false)
+  const [isResetUnlocked, setIsResetUnlocked] = useState(false)
   const [roundPipeOptions, setRoundPipeOptions] = useState<PipeOption[]>([])
-  const [tileBankOption, setTileBankOption] = useState<PipeOption | null>(null)
   const [portalLinks, setPortalLinks] = useState<PortalLink[]>([])
   const [portalLinkDrag, setPortalLinkDrag] = useState<PortalLinkDragState | null>(null)
   const [isLoadingState, setIsLoadingState] = useState(true)
@@ -564,15 +628,23 @@ const DiamondGrid: React.FC = () => {
   const hasCenteredOnSourceRef = useRef(false)
   const previousRoundRef = useRef<number | null>(null)
   const heatLevelRef = useRef(0)
-  const roundAnnouncementTimeoutRef = useRef<number | null>(null)
   const heatWarningStartTimeoutRef = useRef<number | null>(null)
   const heatWarningTimeoutRef = useRef<number | null>(null)
   const moveAudioRef = useRef<HTMLAudioElement | null>(null)
   const slotAudioRef = useRef<HTMLAudioElement | null>(null)
+  const bombAudioRef = useRef<HTMLAudioElement | null>(null)
+  const laughingGodAudioRef = useRef<HTMLAudioElement | null>(null)
   const audioUnlockedRef = useRef(false)
   const movePlayingRef = useRef(false)
+  const konamiIndexRef = useRef(0)
 
   const playerLabels = ['Player 1', 'Player 2', 'Player 3', 'Player 4'] as const
+
+  const roundAnnouncementImageByOutcome: Record<RoundEventOutcome, { src: string; alt: string }> = {
+    hinder: { src: '/laughing-god.png', alt: 'Laughing god' },
+    nothing: { src: '/busy-god.png', alt: 'Busy god' },
+    help: { src: '/pleased-god.png', alt: 'Pleased god' },
+  }
 
   const applyState = (state: GridApiState) => {
     const nextRoundEvent = state.roundEvent ?? null
@@ -588,11 +660,10 @@ const DiamondGrid: React.FC = () => {
       setActivePlayerIndex(0)
       setMagicItemCount(0)
       setShowRoundAnnouncement(false)
+      setRoundAnnouncementOutcome('nothing')
       setShowHeatWarning(false)
-      if (roundAnnouncementTimeoutRef.current !== null) {
-        window.clearTimeout(roundAnnouncementTimeoutRef.current)
-        roundAnnouncementTimeoutRef.current = null
-      }
+      setShowHeatRoundLockWarning(false)
+      setPendingEndRoundAfterHeatWarning(false)
       if (heatWarningStartTimeoutRef.current !== null) {
         window.clearTimeout(heatWarningStartTimeoutRef.current)
         heatWarningStartTimeoutRef.current = null
@@ -617,19 +688,17 @@ const DiamondGrid: React.FC = () => {
 
       const announcementTitle = nextRoundEvent?.headline ?? 'The Gods Are Too Busy To Care'
       const announcementText = nextRoundEvent?.message ?? 'No omen stirs this round.'
+      const announcementOutcome = nextRoundEvent?.outcome ?? 'nothing'
       setRoundAnnouncementTitle(announcementTitle)
       setRoundAnnouncementText(announcementText)
+      setRoundAnnouncementOutcome(announcementOutcome)
       setShowRoundAnnouncement(true)
-      if (roundAnnouncementTimeoutRef.current !== null) {
-        window.clearTimeout(roundAnnouncementTimeoutRef.current)
+      if (announcementOutcome === 'hinder') {
+        playLaughingGodSound()
       }
-      roundAnnouncementTimeoutRef.current = window.setTimeout(() => {
-        setShowRoundAnnouncement(false)
-        roundAnnouncementTimeoutRef.current = null
-      }, 2500)
 
       if (nextHeatLevel > 5) {
-        setHeatWarningText('They are succumbing to the heat of the room and must leave before they perish!')
+        setHeatWarningText('You are succumbing to the heat of the room and must leave before you perish!')
         setShowHeatWarning(false)
         if (heatWarningStartTimeoutRef.current !== null) {
           window.clearTimeout(heatWarningStartTimeoutRef.current)
@@ -656,15 +725,27 @@ const DiamondGrid: React.FC = () => {
     setFlow(state.flow)
     setRound(nextRound)
     setPortalLinks(Array.isArray(state.portalLinks) ? state.portalLinks : [])
+    setBrokenPipeKinds(new Map(state.brokenPipeKinds || []))
     setRoundPipeOptions(
       state.palette
-        .map(kind => pipeOptionByKind[kind])
+        .map(entry => {
+          const kind = typeof entry === 'string' ? entry : entry.kind
+          const baseOption = pipeOptionByKind[kind]
+          if (!baseOption) return null
+          if (kind !== 'broken') return baseOption
+
+          const brokenOriginalKind = typeof entry === 'string' ? undefined : entry.brokenOriginalKind
+          const brokenLabel = brokenOriginalKind
+            ? `Broken ${pipeOptionByKind[brokenOriginalKind]?.label ?? 'Pipe'}`
+            : 'Broken Pipe'
+
+          return {
+            ...baseOption,
+            label: brokenLabel,
+            brokenOriginalKind,
+          }
+        })
         .filter((option): option is PipeOption => Boolean(option && option.kind !== 'quench-vent')),
-    )
-    setTileBankOption(
-      state.tileBank && state.tileBank !== 'quench-vent'
-        ? pipeOptionByKind[state.tileBank]
-        : null,
     )
     setPipesByKey(
       new Map(state.pipes.map(pipe => [keyFor(pipe.row, pipe.col), pipe.kind])),
@@ -677,6 +758,8 @@ const DiamondGrid: React.FC = () => {
     heatLevelRef.current = 0
     setHeatLevel(0)
     setShowHeatWarning(false)
+    setShowHeatRoundLockWarning(false)
+    setPendingEndRoundAfterHeatWarning(false)
     if (heatWarningStartTimeoutRef.current !== null) {
       window.clearTimeout(heatWarningStartTimeoutRef.current)
       heatWarningStartTimeoutRef.current = null
@@ -691,7 +774,7 @@ const DiamondGrid: React.FC = () => {
     if (audioUnlockedRef.current) return
     audioUnlockedRef.current = true
 
-    const sounds = [moveAudioRef.current, slotAudioRef.current]
+    const sounds = [moveAudioRef.current, slotAudioRef.current, bombAudioRef.current, laughingGodAudioRef.current]
     sounds.forEach(sound => {
       if (!sound) return
       try {
@@ -747,6 +830,23 @@ const DiamondGrid: React.FC = () => {
     sound.play().catch(() => {})
   }
 
+  const playBombSound = () => {
+    const sound = bombAudioRef.current
+    if (!sound) return
+    stopTileMoveSound()
+    sound.pause()
+    sound.currentTime = 0
+    sound.play().catch(() => {})
+  }
+
+  const playLaughingGodSound = () => {
+    const sound = laughingGodAudioRef.current
+    if (!sound) return
+    sound.pause()
+    sound.currentTime = 0
+    sound.play().catch(() => {})
+  }
+
   useEffect(() => {
     const moveAudio = new Audio('/tile-move.wav')
     moveAudio.volume = 0.1
@@ -758,10 +858,22 @@ const DiamondGrid: React.FC = () => {
     slotAudio.preload = 'auto'
     slotAudioRef.current = slotAudio
 
+    const bombAudio = new Audio('/bomb.mp3')
+    bombAudio.volume = 0.6
+    bombAudio.preload = 'auto'
+    bombAudioRef.current = bombAudio
+
+    const laughingGodAudio = new Audio('/laughing-god.mp3')
+    laughingGodAudio.volume = 0.6
+    laughingGodAudio.preload = 'auto'
+    laughingGodAudioRef.current = laughingGodAudio
+
     return () => {
       stopTileMoveSound()
       moveAudioRef.current = null
       slotAudioRef.current = null
+      bombAudioRef.current = null
+      laughingGodAudioRef.current = null
     }
   }, [])
 
@@ -801,9 +913,6 @@ const DiamondGrid: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      if (roundAnnouncementTimeoutRef.current !== null) {
-        window.clearTimeout(roundAnnouncementTimeoutRef.current)
-      }
       if (heatWarningStartTimeoutRef.current !== null) {
         window.clearTimeout(heatWarningStartTimeoutRef.current)
       }
@@ -812,6 +921,44 @@ const DiamondGrid: React.FC = () => {
       }
     }
   }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isResetUnlocked) return
+
+      const target = event.target as HTMLElement | null
+      if (
+        target
+        && (
+          target.tagName === 'INPUT'
+          || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT'
+          || target.isContentEditable
+        )
+      ) {
+        return
+      }
+
+      const normalizedKey = event.key.length === 1 ? event.key.toLowerCase() : event.key
+      const expectedKey = KONAMI_SEQUENCE[konamiIndexRef.current]
+
+      if (normalizedKey === expectedKey) {
+        konamiIndexRef.current += 1
+        if (konamiIndexRef.current === KONAMI_SEQUENCE.length) {
+          setIsResetUnlocked(true)
+          konamiIndexRef.current = 0
+        }
+        return
+      }
+
+      konamiIndexRef.current = normalizedKey === KONAMI_SEQUENCE[0] ? 1 : 0
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isResetUnlocked])
 
   const { containerWidth, containerHeight } = useMemo(() => {
     const maxCol = tiles.reduce((max, t) => Math.max(max, t.col), 0)
@@ -841,9 +988,13 @@ const DiamondGrid: React.FC = () => {
     hasCenteredOnSourceRef.current = true
   }, [isLoadingState, tiles, containerWidth, containerHeight])
 
-  const placePipe = async (row: number, col: number, pipeKind: PipeKind, source: PlacementSource): Promise<GridApiState | null> => {
-    if (pipeKind === 'broken') return null
-    
+  const placePipe = async (
+    row: number,
+    col: number,
+    pipeKind: PipeKind,
+    source: PlacementSource,
+    brokenOriginalKind?: PipeKind,
+  ): Promise<GridApiState | null> => {
     const targetTile = tiles.find(tile => tile.row === row && tile.col === col)
     if (!targetTile || !(targetTile.type === 'normal' || targetTile.type === 'empty')) return null
 
@@ -858,14 +1009,30 @@ const DiamondGrid: React.FC = () => {
       if (!hasAdjacentBedrock) return null
     }
 
-    return sendPipeUpdate(row, col, pipeKind, source)
+    return sendPipeUpdate(row, col, pipeKind, source, brokenOriginalKind)
   }
 
-  const handleEndRound = async () => {
+  const endRoundNow = async () => {
     const nextState = await sendEndRound()
     if (nextState) {
       applyState(nextState)
     }
+  }
+
+  const handleEndRound = async () => {
+    if (heatLevelRef.current === 4) {
+      setShowHeatRoundLockWarning(true)
+      setPendingEndRoundAfterHeatWarning(true)
+      return
+    }
+    await endRoundNow()
+  }
+
+  const handleDismissHeatRoundLockWarning = async () => {
+    setShowHeatRoundLockWarning(false)
+    if (!pendingEndRoundAfterHeatWarning) return
+    setPendingEndRoundAfterHeatWarning(false)
+    await endRoundNow()
   }
 
   const handleResetState = async () => {
@@ -990,6 +1157,11 @@ const DiamondGrid: React.FC = () => {
       return keys
     }
 
+    if (pipeKind === 'portal-entrance') {
+      const hasExistingEntrance = Array.from(pipesByKey.values()).some(kind => kind === 'portal-entrance')
+      if (hasExistingEntrance) return keys
+    }
+
     for (const tile of tiles) {
       const tileKey = keyFor(tile.row, tile.col)
       const pipe = pipesByKey.get(tileKey)
@@ -1053,14 +1225,6 @@ const DiamondGrid: React.FC = () => {
     return null
   }
 
-  const findBankDropTarget = (clientX: number, clientY: number): boolean => {
-    const elements = document.elementsFromPoint(clientX, clientY)
-    return elements.some(element => {
-      const el = element as HTMLElement
-      return el.dataset.bankDropTarget === 'true'
-    })
-  }
-
   const isPointerOverGridTile = (clientX: number, clientY: number): boolean => {
     const elements = document.elementsFromPoint(clientX, clientY)
     return elements.some(element => {
@@ -1073,7 +1237,6 @@ const DiamondGrid: React.FC = () => {
   }
 
   const startPipeDrag = (option: PipeOption, source: DragSource, paletteIndex: number | null, startX: number, startY: number) => {
-    if (source !== 'delete' && option.kind === 'broken') return
     unlockAudio()
     playTileMoveSound()
 
@@ -1081,6 +1244,7 @@ const DiamondGrid: React.FC = () => {
 
     setDragState({
       pipeKind: option.kind,
+        brokenOriginalKind: option.brokenOriginalKind,
       symbol: option.symbol,
       source,
       paletteIndex,
@@ -1088,13 +1252,11 @@ const DiamondGrid: React.FC = () => {
       y: startY,
       hoveredTileKey: null,
       isOverGrid: false,
-      isOverBank: false,
     })
 
     const handlePointerMove = (event: PointerEvent) => {
-      const isOverBank = findBankDropTarget(event.clientX, event.clientY)
       const isOverGrid = isPointerOverGridTile(event.clientX, event.clientY)
-      const target = isOverBank ? null : findDropTarget(event.clientX, event.clientY, dragValidDropKeys)
+      const target = findDropTarget(event.clientX, event.clientY, dragValidDropKeys)
       setDragState(current =>
         current
           ? {
@@ -1103,7 +1265,6 @@ const DiamondGrid: React.FC = () => {
               y: event.clientY,
               hoveredTileKey: target ? target.key : null,
               isOverGrid,
-              isOverBank,
             }
           : null,
       )
@@ -1112,28 +1273,25 @@ const DiamondGrid: React.FC = () => {
     const finishDrag = (event: PointerEvent) => {
       stopTileMoveSound()
 
-      const isOverBank = findBankDropTarget(event.clientX, event.clientY)
-      const target = isOverBank ? null : findDropTarget(event.clientX, event.clientY, dragValidDropKeys)
+      const target = findDropTarget(event.clientX, event.clientY, dragValidDropKeys)
 
-      if (isOverBank && source === 'palette' && option.kind !== 'broken') {
-        void (async () => {
-          const nextState = await sendBankTile(option.kind)
-          if (nextState) {
-            applyState(nextState)
-            playTileSlotSound()
-          }
-        })()
-      } else if (source === 'delete' && target) {
+      if (source === 'delete' && target) {
         void (async () => {
           const nextState = await sendDeletePipe(target.row, target.col)
           if (nextState) {
             applyState(nextState)
-            playTileSlotSound()
+            playBombSound()
           }
         })()
       } else if (target) {
         void (async () => {
-          const nextState = await placePipe(target.row, target.col, option.kind, source as PlacementSource)
+          const nextState = await placePipe(
+            target.row,
+            target.col,
+            option.kind,
+            source as PlacementSource,
+            option.brokenOriginalKind,
+          )
           if (nextState) {
             applyState(nextState)
             playTileSlotSound()
@@ -1377,14 +1535,27 @@ const DiamondGrid: React.FC = () => {
   const reservedGridWidth = Math.max(containerWidth, 1100)
   const reservedGridHeight = Math.max(containerHeight, 620)
   const heatPercent = Math.min(100, Math.round((heatLevel / 5) * 100))
+  const roundAnnouncementImage = roundAnnouncementImageByOutcome[roundAnnouncementOutcome]
 
   return (
     <div className="h-dvh overflow-hidden box-border p-2 relative">
       {showRoundAnnouncement ? (
         <div className="round-event-overlay" aria-live="polite">
           <div className="round-event-banner">
+            <img
+              src={roundAnnouncementImage.src}
+              alt={roundAnnouncementImage.alt}
+              className="round-event-god-image"
+            />
             <p className="round-event-title">{roundAnnouncementTitle}</p>
             <p className="round-event-text">{roundAnnouncementText}</p>
+            <button
+              type="button"
+              onClick={() => setShowRoundAnnouncement(false)}
+              className="round-event-dismiss"
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       ) : null}
@@ -1396,6 +1567,25 @@ const DiamondGrid: React.FC = () => {
             <div className="heat-warning-banner">{heatWarningText}</div>
           </div>
         </>
+      ) : null}
+
+      {showHeatRoundLockWarning ? (
+        <div className="heat-round-lock-overlay" aria-live="assertive">
+          <div className="heat-round-lock-banner">
+            <img src="/too-hot.png" alt="Too hot warning" className="heat-round-lock-image" />
+            <p className="heat-round-lock-title">Too Hot</p>
+            <p className="heat-round-lock-text">You have 1 more round before you start taking damage.</p>
+            <button
+              type="button"
+              onClick={() => {
+                void handleDismissHeatRoundLockWarning()
+              }}
+              className="round-event-dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
       ) : null}
 
       <div className="mx-auto flex h-full min-h-0 flex-col max-w-[1600px] gap-2">
@@ -1412,6 +1602,20 @@ const DiamondGrid: React.FC = () => {
             <div className="text-center">
               <p className="text-sm font-semibold text-amber-200">Magic Items</p>
               <p className="text-lg font-bold" style={{ color: '#b8f7ff' }}>{magicItemCount}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-center">
+              <p className="text-sm font-semibold text-amber-200">Heat</p>
+              <div className="flex items-center gap-2">
+                <div className="h-4 overflow-hidden rounded bg-[#2a1f14]" style={{ width: '200px' }}>
+                  <div
+                    className={`h-full transition-all duration-300 ${heatLevel > 5 ? 'bg-red-600' : 'bg-amber-500'}`}
+                    style={{ width: `${heatPercent}%` }}
+                  />
+                </div>
+                <p className="text-base font-bold" style={{ color: heatLevel > 5 ? '#f87171' : '#e6c274', minWidth: '32px' }}>{heatLevel}/5</p>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1450,24 +1654,12 @@ const DiamondGrid: React.FC = () => {
           </div>
         </div>
 
-        <div className="rounded-lg border border-amber-700 bg-[#1a1410] p-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-amber-200">Heat</p>
-            <p className="text-sm font-bold" style={{ color: heatLevel > 5 ? '#f87171' : '#e6c274' }}>{heatLevel}/5</p>
-          </div>
-          <div className="mt-1 h-3 w-full overflow-hidden rounded bg-[#2a1f14]">
-            <div
-              className={`h-full transition-all duration-300 ${heatLevel > 5 ? 'bg-red-600' : 'bg-amber-500'}`}
-              style={{ width: `${heatPercent}%` }}
-            />
-          </div>
-        </div>
-
-        <div ref={gridViewportRef} className="custom-scrollbar min-h-0 flex-1 w-full overflow-auto">
-          <div className="mx-auto w-max">
+        <div className="min-h-0 flex-1 w-full overflow-hidden rounded-lg border border-amber-700 bg-[#1a1410]">
+          <div ref={gridViewportRef} className="custom-scrollbar h-full w-full overflow-auto">
+            <div className="mx-auto w-max">
           <div
             ref={gridRef}
-            className="relative border border-amber-700 rounded-lg bg-[#1a1410]"
+            className="relative"
             data-grid-drop-zone="true"
             style={{
               width: isLoadingState ? reservedGridWidth : containerWidth,
@@ -1488,6 +1680,7 @@ const DiamondGrid: React.FC = () => {
                   col={tile.col}
                   type={tile.type}
                   pipeKind={pipesByKey.get(keyFor(tile.row, tile.col))}
+                  brokenPipeKinds={brokenPipeKinds}
                   isFlowActive={activePipeKeySet.has(keyFor(tile.row, tile.col))}
                   isVentActive={activeVentKeySet.has(keyFor(tile.row, tile.col))}
                   isVentSprayAdjacent={ventSprayTileKeySet.has(keyFor(tile.row, tile.col))}
@@ -1545,11 +1738,11 @@ const DiamondGrid: React.FC = () => {
             </svg>
           </div>
         </div>
+          </div>
         </div>
 
         <div className="flex items-start gap-2">
           <aside className="min-w-0 flex-1 rounded-lg border border-amber-700 bg-[#1a1410] p-2">
-            <h2 className="mb-1 text-xs font-semibold tracking-wide text-amber-200">Pipe Palette</h2>
             <div className="custom-scrollbar max-h-24 overflow-auto pr-1">
               <div className="grid grid-cols-6 gap-1">
                 {isLoadingState
@@ -1567,7 +1760,7 @@ const DiamondGrid: React.FC = () => {
                             event.preventDefault()
                             startPipeDrag(option, 'palette', index, event.clientX, event.clientY)
                           }}
-                          className={`relative flex h-24 w-24 items-end justify-center overflow-hidden rounded bg-amber-900 p-2 text-left text-amber-100 transition flex-col gap-1 ${option.kind === 'broken' ? 'opacity-70 cursor-not-allowed' : ''}`}
+                          className="relative flex h-24 w-24 items-end justify-center overflow-hidden rounded bg-amber-900 p-2 text-left text-amber-100 transition flex-col gap-1"
                           style={{
                             ...(dragState?.source === 'palette' && dragState.paletteIndex === index ? {
                               position: 'fixed',
@@ -1587,20 +1780,12 @@ const DiamondGrid: React.FC = () => {
                             className="absolute inset-0"
                             style={{
                               backgroundColor: '#2a1f14',
-                              ...getPipePreviewStyle(option.kind),
-                              transform: getSpriteRotation(option.kind),
-                              transformOrigin: getSpriteRotation(option.kind) ? 'center' : undefined,
+                              ...getPipePreviewStyle(option.kind, option.brokenOriginalKind),
                             }}
                           />
-                          <span
-                            className="absolute bottom-1 right-1 z-10 text-lg font-bold leading-none"
-                            style={{
-                              display: dragState?.source === 'palette' && dragState.paletteIndex === index && dragState.isOverGrid ? 'none' : undefined,
-                              textShadow: '0 0 6px rgba(0, 0, 0, 0.85)',
-                            }}
-                          >
-                            {option.symbol}
-                          </span>
+                          {option.kind === 'broken' ? (
+                            <div className="disabled-q-cross" aria-hidden="true" />
+                          ) : null}
                         </button>
                       </div>
                     ))}
@@ -1609,8 +1794,7 @@ const DiamondGrid: React.FC = () => {
           </aside>
 
           <aside className="w-[120px] shrink-0 rounded-lg border border-amber-700 bg-[#1a1410] p-2">
-            <h2 className="mb-1 text-xs font-semibold tracking-wide text-amber-200">Destroy Pipe</h2>
-            <div className="h-24 w-24">
+            <div className="mx-auto h-24 w-24">
               <button
                 type="button"
                 onPointerDown={event => {
@@ -1632,64 +1816,7 @@ const DiamondGrid: React.FC = () => {
                 } : undefined}
               >
                 <img src="/bomb.png" alt="Destroy" className="absolute inset-0 h-full w-full object-cover" />
-                <span className="text-xs text-center" style={{ display: dragState?.source === 'delete' && dragState.isOverGrid ? 'none' : undefined }}>Delete</span>
               </button>
-            </div>
-          </aside>
-
-          <aside className="w-[120px] shrink-0 rounded-lg border border-amber-700 bg-[#1a1410] p-2">
-            <h2 className="mb-1 text-xs font-semibold tracking-wide text-amber-200">Pipe Bank</h2>
-            <div
-              data-bank-drop-target="true"
-              className={`h-24 w-24 rounded border bg-amber-900 ${dragState?.isOverBank ? 'border-yellow-500 shadow-[0_0_12px_rgba(212,168,90,0.55)]' : 'border-amber-700'}`}
-            >
-              {isLoadingState ? (
-                <div className="h-full w-full animate-pulse rounded bg-amber-900" />
-              ) : tileBankOption ? (
-                <button
-                  type="button"
-                  onPointerDown={event => {
-                    event.preventDefault()
-                    startPipeDrag(tileBankOption, 'bank', null, event.clientX, event.clientY)
-                  }}
-                  className="relative flex h-24 w-24 items-end justify-center overflow-hidden rounded bg-amber-900 p-2 text-amber-100 transition flex-col gap-1"
-                  style={{
-                    ...(dragState?.source === 'bank' ? {
-                      position: 'fixed',
-                      left: dragState.x,
-                      top: dragState.y,
-                      transform: 'translate(-50%, -50%)',
-                      width: dragState.isOverGrid ? TILE_SIZE : undefined,
-                      height: dragState.isOverGrid ? TILE_SIZE : undefined,
-                      zIndex: 1000,
-                      pointerEvents: 'none',
-                      boxShadow: '0 0 12px rgba(212,168,90,0.75)',
-                      borderColor: '#d4a85a',
-                    } : {}),
-                  }}
-                >
-                  <div
-                    className="absolute inset-0"
-                    style={{
-                      backgroundColor: '#2a1f14',
-                      ...getPipePreviewStyle(tileBankOption.kind),
-                      transform: getSpriteRotation(tileBankOption.kind),
-                      transformOrigin: getSpriteRotation(tileBankOption.kind) ? 'center' : undefined,
-                    }}
-                  />
-                  <span
-                    className="absolute bottom-1 right-1 z-10 text-lg font-bold leading-none"
-                    style={{
-                      display: dragState?.source === 'bank' && dragState.isOverGrid ? 'none' : undefined,
-                      textShadow: '0 0 6px rgba(0, 0, 0, 0.85)',
-                    }}
-                  >
-                    {tileBankOption.symbol}
-                  </span>
-                </button>
-              ) : (
-                <div data-bank-drop-target="true" className="flex h-full items-center justify-center text-xs" style={{ color: '#8B7355' }}>Empty</div>
-              )}
             </div>
           </aside>
         </div>

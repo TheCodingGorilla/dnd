@@ -7,6 +7,7 @@ interface UpdateBody {
   row?: unknown
   col?: unknown
   pipeKind?: unknown
+  brokenOriginalKind?: unknown
   source?: unknown
 }
 
@@ -35,7 +36,23 @@ function isPipeKind(value: unknown): value is PipeKind {
 }
 
 function isPlacementSource(value: unknown): value is PlacementSource {
-  return value === 'palette' || value === 'bank'
+  return value === 'palette'
+}
+
+function isBrokenOriginalKind(value: unknown): value is PipeKind {
+  return (
+    value === 'horizontal' ||
+    value === 'vertical' ||
+    value === 'corner-left-bottom' ||
+    value === 'corner-right-bottom' ||
+    value === 'corner-right-top' ||
+    value === 'corner-left-top' ||
+    value === 't-open-top' ||
+    value === 't-open-bottom' ||
+    value === 't-open-left' ||
+    value === 't-open-right' ||
+    value === 'cross'
+  )
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -46,8 +63,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const source: PlacementSource = isPlacementSource(body.source) ? body.source : 'palette'
+  const brokenOriginalKind = isBrokenOriginalKind(body.brokenOriginalKind) ? body.brokenOriginalKind : undefined
 
-  const placement = placePipe(body.row, body.col, body.pipeKind, source)
+  const placement = placePipe(body.row, body.col, body.pipeKind, source, brokenOriginalKind)
   if (!placement) {
     return Response.json({ error: 'Tile cannot accept a pipe' }, { status: 400 })
   }

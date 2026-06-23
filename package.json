@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "node -e \"const fs=require('fs');for (const d of ['.next','.next-dev']) fs.rmSync(d,{recursive:true,force:true});\" && next dev -p 3001",
     "build": "next build",
+    "build:clean": "node -e \"const fs=require('fs');for (const d of ['.next','.next-dev']) fs.rmSync(d,{recursive:true,force:true});\" && next build",
     "start": "next start",
     "lint": "next lint"
   },

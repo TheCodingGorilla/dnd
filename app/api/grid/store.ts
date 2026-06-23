@@ -25,6 +25,11 @@ export interface PipePlacement {
   kind: PipeKind
 }
 
+export interface PaletteEntry {
+  kind: PipeKind
+  brokenOriginalKind?: PipeKind
+}
+
 export interface FlowState {
   activePipeKeys: string[]
   activeVentKeys: string[]
@@ -61,11 +66,11 @@ export interface GridState {
   portalLinks: PortalLink[]
   roundEvent: RoundEvent | null
   round: number
-  palette: PipeKind[]
-  tileBank: PipeKind | null
+  palette: PaletteEntry[]
+  brokenPipeKinds: Array<[string, PipeKind]>
 }
 
-export type PlacementSource = 'palette' | 'bank'
+export type PlacementSource = 'palette'
 
 type GridListener = (state: GridState) => void
 
@@ -127,21 +132,44 @@ function maxCountForPipe(kind: PipeKind): number {
   return 6 // all other pipes can appear multiple times
 }
 
-function createRoundPalette(round: number, hasSeenPortalEntrance: boolean, hasSeenPortalExit: boolean): PipeKind[] {
-  const nextPalette: PipeKind[] = []
+const brokenVariantKinds: PipeKind[] = [
+  'horizontal',
+  'vertical',
+  'corner-left-bottom',
+  'corner-right-bottom',
+  'corner-right-top',
+  'corner-left-top',
+  't-open-top',
+  't-open-bottom',
+  't-open-left',
+  't-open-right',
+  'cross',
+]
+
+function createRoundPalette(round: number, hasSeenPortalEntrance: boolean, hasSeenPortalExit: boolean): PaletteEntry[] {
+  const nextPalette: PaletteEntry[] = []
   const counts = new Map<PipeKind, number>()
 
-  const addCandidate = (kind: PipeKind): boolean => {
+  const addCandidate = (kind: PipeKind, brokenOriginalKind?: PipeKind): boolean => {
     const currentCount = counts.get(kind) ?? 0
     if (currentCount >= maxCountForPipe(kind)) return false
-    nextPalette.push(kind)
+    nextPalette.push({ kind, brokenOriginalKind })
     counts.set(kind, currentCount + 1)
     return true
   }
 
-  // Add broken pipe (70% chance)
+  const addBrokenCandidate = (): boolean => {
+    const randomIndex = Math.floor(Math.random() * brokenVariantKinds.length)
+    const brokenOriginalKind = brokenVariantKinds[randomIndex]
+    return addCandidate('broken', brokenOriginalKind)
+  }
+
+  // Add 1-2 broken pipe variants (never more than 2 total).
   if (Math.random() < brokenPipeChance) {
-    addCandidate('broken')
+    addBrokenCandidate()
+    if (Math.random() < 0.4) {
+      addBrokenCandidate()
+    }
   }
 
   let addedPortalThisRound = false
@@ -283,13 +311,13 @@ function prunePortalLinks(pipeMap: Map<string, PipeKind>, portalLinks: Map<strin
 interface GridStore {
   gridMap: Map<string, GridTile>
   pipeMap: Map<string, PipeKind>
+  brokenPipeKinds: Map<string, PipeKind>
   quenchVentRoundMap: Map<string, number>
   portalLinks: Map<string, string>
   latestRoundEvent: RoundEvent | null
   listeners: Set<GridListener>
   round: number
-  palette: PipeKind[]
-  tileBank: PipeKind | null
+  palette: PaletteEntry[]
   hasSeenPortalEntrance: boolean
   hasSeenPortalExit: boolean
 }
@@ -311,22 +339,22 @@ function createStore(listeners: Set<GridListener> = new Set<GridListener>()): Gr
   const store: GridStore = {
     gridMap: new Map(initialGridMap),
     pipeMap: new Map(initialPipeMap),
+    brokenPipeKinds: new Map<string, PipeKind>(),
     quenchVentRoundMap: createInitialVentRoundMap(),
     portalLinks: new Map<string, string>(),
     latestRoundEvent: null,
     listeners,
     round: 1,
     palette: [],
-    tileBank: null,
     hasSeenPortalEntrance: false,
     hasSeenPortalExit: false,
   }
 
   store.palette = createRoundPalette(store.round, store.hasSeenPortalEntrance, store.hasSeenPortalExit)
-  if (store.palette.includes('portal-entrance')) {
+  if (store.palette.some(entry => entry.kind === 'portal-entrance')) {
     store.hasSeenPortalEntrance = true
   }
-  if (store.palette.includes('portal-exit')) {
+  if (store.palette.some(entry => entry.kind === 'portal-exit')) {
     store.hasSeenPortalExit = true
   }
 
@@ -372,6 +400,17 @@ function getStore(): GridStore {
       recoveredVentMap.set(key, connectedVentKeys.has(key) ? ventDamagedState : ventIdleState)
     }
     existing.quenchVentRoundMap = recoveredVentMap
+  }
+
+  // Initialize brokenPipeKinds if missing (migration for old stored state)
+  if (!existing.brokenPipeKinds) {
+    existing.brokenPipeKinds = new Map<string, PipeKind>()
+  }
+
+  // Migrate legacy palette shape (PipeKind[]) to PaletteEntry[].
+  if (existing.palette.length > 0 && typeof (existing.palette[0] as unknown) === 'string') {
+    const legacyPalette = existing.palette as unknown as PipeKind[]
+    existing.palette = legacyPalette.map(kind => ({ kind }))
   }
 
   return existing
@@ -559,7 +598,7 @@ function getGridState(): GridState {
     roundEvent: store.latestRoundEvent,
     round: store.round,
     palette: store.palette,
-    tileBank: store.tileBank,
+    brokenPipeKinds: Array.from(store.brokenPipeKinds.entries()),
   }
 }
 
@@ -586,8 +625,9 @@ function canPlacePipeAt(row: number, col: number, kind: PipeKind, pipeMap: Map<s
   // Can't place on bedrock
   if (tile.type === 'bedrock') return false
 
-  // For non-portal pipes, need at least one adjacent connection (to a pipe or water-source)
-  if (kind !== 'portal-entrance' && kind !== 'portal-exit' && kind !== 'broken') {
+  // For all pipes except portal-exit and broken, require at least one adjacent connection.
+  // This includes portal-entrance so it can only be placed in a valid flow spot.
+  if (kind !== 'portal-exit' && kind !== 'broken') {
     const connections = getConnections(kind)
     const hasConnection = connections.some(dir => {
       const delta = deltas[dir]
@@ -620,7 +660,7 @@ function canPlacePipeAt(row: number, col: number, kind: PipeKind, pipeMap: Map<s
   return true
 }
 
-export function placePipe(row: number, col: number, kind: PipeKind, source: PlacementSource): boolean {
+export function placePipe(row: number, col: number, kind: PipeKind, source: PlacementSource, brokenOriginalKind?: PipeKind): boolean {
   const store = getStore()
 
   if (!canPlacePipeAt(row, col, kind, store.pipeMap, store.gridMap)) {
@@ -629,19 +669,18 @@ export function placePipe(row: number, col: number, kind: PipeKind, source: Plac
 
   const key = keyFor(row, col)
   store.pipeMap.set(key, kind)
+  if (kind === 'broken') {
+    store.brokenPipeKinds.set(key, brokenOriginalKind ?? 'horizontal')
+  }
 
   if (source === 'palette') {
-    const index = store.palette.indexOf(kind)
+    const index = store.palette.findIndex(entry => (
+      entry.kind === kind
+      && (kind !== 'broken' || entry.brokenOriginalKind === brokenOriginalKind)
+    ))
     if (index > -1) {
       store.palette.splice(index, 1)
     }
-    // placing from palette clears bank
-    store.tileBank = null
-  }
-
-  if (source === 'bank') {
-    if (store.tileBank !== kind) return false
-    store.tileBank = null
   }
 
   // If we placed a portal, mark it as seen
@@ -665,6 +704,7 @@ export function deletePipe(row: number, col: number): boolean {
   if (fixedQuenchVentKeys.has(key)) return false
 
   store.pipeMap.delete(key)
+  store.brokenPipeKinds.delete(key)
   if (existing === 'portal-entrance') {
     store.portalLinks.delete(key)
   }
@@ -675,20 +715,6 @@ export function deletePipe(row: number, col: number): boolean {
       }
     }
   }
-
-  notifyListeners()
-  return true
-}
-
-export function bankTile(pipeKind: PipeKind): boolean {
-  const store = getStore()
-
-  // If there's already a banked tile, it's discarded (removed from game)
-  const index = store.palette.indexOf(pipeKind)
-  if (index < 0) return false
-
-  store.palette.splice(index, 1)
-  store.tileBank = pipeKind
 
   notifyListeners()
   return true
@@ -718,17 +744,16 @@ export function endRound(): void {
   const activeVentKeySet = new Set(currentState.flow.activeVentKeys)
   store.round += 1
   store.palette = createRoundPalette(store.round, store.hasSeenPortalEntrance, store.hasSeenPortalExit)
-  if (store.palette.includes('portal-entrance')) {
+  if (store.palette.some(entry => entry.kind === 'portal-entrance')) {
     store.hasSeenPortalEntrance = true
   }
-  if (store.palette.includes('portal-exit')) {
+  if (store.palette.some(entry => entry.kind === 'portal-exit')) {
     store.hasSeenPortalExit = true
   }
-  store.tileBank = null
 
   // Trickster Old God event roll each round.
   const roll = Math.random()
-  if (roll < 0.10) {
+  if (roll < 0.25) {
     // Help chance: reduce heat usually, very rare magical item message.
     if (Math.random() < 0.01) {
       store.latestRoundEvent = {
@@ -745,7 +770,7 @@ export function endRound(): void {
         message: 'A cool blessing tempers the room. Heat reduced by 1.',
       }
     }
-  } else if (roll < 0.35) {
+  } else if (roll < 0.50) {
     // Hinder chance: break one random placed non-fixed pipe.
     const breakableKeys = Array.from(store.pipeMap.entries())
       .filter(([key, kind]) => (
@@ -759,6 +784,10 @@ export function endRound(): void {
 
     if (breakableKeys.length > 0) {
       const randomKey = breakableKeys[Math.floor(Math.random() * breakableKeys.length)]
+      const originalKind = store.pipeMap.get(randomKey)
+      if (originalKind) {
+        store.brokenPipeKinds.set(randomKey, originalKind)
+      }
       store.pipeMap.set(randomKey, 'broken')
       store.portalLinks = prunePortalLinks(store.pipeMap, store.portalLinks)
 
